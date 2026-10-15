@@ -1,0 +1,12 @@
+# build artifacts
+target/
+*.class
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.idea/
+*.iml
+.DS_Store
+_site/
+.bundle/
