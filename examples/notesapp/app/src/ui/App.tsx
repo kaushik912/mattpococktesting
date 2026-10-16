@@ -1,40 +1,23 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./app.css";
 import { openNotes, type ImportSummary, type Notes, type NoteView, type TagCount } from "../core";
+import { ImportStatus, ReminderBanner } from "./Banners";
+import { Editor, type SaveStatus } from "./Editor";
+import { NoteList } from "./NoteList";
+import { TagsRail } from "./TagsRail";
+import { TrashView } from "./TrashView";
 
 const AUTOSAVE_DELAY_MS = 400;
 /** Rows rendered at a time: keeps the DOM small at 10k Notes. Search or a Tag narrows further. */
 const PAGE_SIZE = 200;
-
-/** Memoised so a refresh re-renders only Notes that changed, not all 10k rows. */
-const NoteRow = memo(function NoteRow({
-  note,
-  selected,
-  onSelect,
-}: {
-  note: NoteView;
-  selected: boolean;
-  onSelect: (note: NoteView) => void;
-}) {
-  return (
-    <li>
-      <button onClick={() => onSelect(note)} aria-current={selected}>
-        {note.title}
-      </button>
-      {note.tags.map((tag) => (
-        <span key={tag} data-testid="tag-chip" style={{ marginLeft: 4, fontSize: 12 }}>
-          #{tag}
-        </span>
-      ))}
-    </li>
-  );
-});
 
 export function App() {
   const [notes, setNotes] = useState<Notes | null>(null);
   const [list, setList] = useState<NoteView[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [focusSignal, setFocusSignal] = useState(0);
   const pending = useRef<{ id: string; text: string } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -90,6 +73,8 @@ export function App() {
     if (!job || !notes) return;
     pending.current = null;
     await notes.update(job.id, job.text);
+    // A newer edit may have queued while saving: only claim "Saved" when nothing is pending.
+    if (!pending.current) setSaveStatus("saved");
     await refresh(notes, activeTag);
   }, [notes, activeTag, refresh]);
 
@@ -97,6 +82,7 @@ export function App() {
     if (!notes) return;
     await flush();
     setTagsOpen(false);
+    setPane("list");
     setShowTrash(false);
     setConfirmingEmpty(false);
     setShown(PAGE_SIZE);
@@ -128,6 +114,8 @@ export function App() {
     await refresh(notes, activeTag);
     setSelectedId(created.id);
     setDraft(created.text);
+    setSaveStatus("idle");
+    setFocusSignal((n) => n + 1);
     setPane("editor");
   }
 
@@ -137,6 +125,7 @@ export function App() {
     await notes.trash(selectedId);
     setSelectedId(null);
     setDraft("");
+    setSaveStatus("idle");
     setPane("list");
     await refresh(notes, activeTag);
   }
@@ -186,6 +175,7 @@ export function App() {
     await flush();
     setSelectedId(note.id);
     setDraft(note.text);
+    setSaveStatus("idle");
     setPane("editor");
   }
   // Stable identity so memoised rows are not re-rendered by every App render.
@@ -196,148 +186,81 @@ export function App() {
   function edit(text: string) {
     if (!selectedId) return;
     setDraft(text);
+    setSaveStatus("saving");
     pending.current = { id: selectedId, text };
     clearTimeout(timer.current);
     timer.current = setTimeout(() => void flush(), AUTOSAVE_DELAY_MS);
   }
 
   return (
-    <>
-    {reminderDue && (
-      <div role="status" aria-label="Export reminder">
-        It has been a while since your last export. Back up your notes.{" "}
-        <button onClick={() => void exportNotes()}>Export now</button>
-      </div>
-    )}
-    <div className="topbar narrow-only">
-      <button aria-expanded={tagsOpen} onClick={() => setTagsOpen((v) => !v)}>
-        Tags menu
-      </button>
-    </div>
-    <main className="layout" data-pane={pane} data-tags-open={tagsOpen}>
-      <nav aria-label="Tags" className="tags">
-        <ul>
-          <li>
-            <button onClick={() => void filterBy(null)} aria-pressed={activeTag === null}>
-              All notes
-            </button>
-          </li>
-          {tags.map(({ tag, count }) => (
-            <li key={tag}>
-              <button onClick={() => void filterBy(tag)} aria-pressed={activeTag === tag}>
-                #{tag} ({count})
-              </button>
-            </li>
-          ))}
-        </ul>
-        <button
-          onClick={() => {
+    <div className="app">
+      {reminderDue && <ReminderBanner onExport={() => void exportNotes()} />}
+      <header className="topbar narrow-only">
+        <button className="btn" aria-expanded={tagsOpen} onClick={() => setTagsOpen((v) => !v)}>
+          Tags menu
+        </button>
+      </header>
+      <main className="layout" data-pane={pane} data-tags-open={tagsOpen}>
+        <TagsRail
+          tags={tags}
+          activeTag={activeTag}
+          trashCount={trashed.length}
+          showTrash={showTrash}
+          ready={!!notes}
+          onFilter={(tag) => void filterBy(tag)}
+          onToggleTrash={() => {
             setShowTrash((v) => !v);
             setTagsOpen(false);
             setConfirmingEmpty(false);
           }}
-          aria-pressed={showTrash}
-        >
-          Trash ({trashed.length})
-        </button>
-      </nav>
-      {showTrash ? (
-      <section aria-label="Trash" className="trash">
-        <h2>Trash</h2>
-        {trashed.length > 0 &&
-          (confirmingEmpty ? (
-            <div role="alertdialog" aria-label="Confirm empty Trash">
-              Permanently delete {trashed.length} trashed note(s)? This cannot be undone.{" "}
-              <button onClick={() => void emptyTrash()}>Confirm empty Trash</button>{" "}
-              <button onClick={() => setConfirmingEmpty(false)}>Cancel</button>
-            </div>
-          ) : (
-            <button onClick={() => setConfirmingEmpty(true)}>Empty Trash</button>
-          ))}
-        <ul aria-label="Trashed notes">
-          {trashed.map((note) => (
-            <li key={note.id}>
-              {note.title}{" "}
-              <button
-                aria-label={`Restore ${note.title}`}
-                onClick={() => void restore(note.id)}
-              >
-                Restore
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
-      ) : (
-      <>
-      <section className="list">
-        <button onClick={newNote} disabled={!notes}>
-          New note
-        </button>
-        <input
-          type="search"
-          aria-label="Search notes"
-          placeholder="Search (try #tag)"
-          value={query}
-          onChange={(e) => void onSearch(e.target.value)}
+          onExport={() => void exportNotes()}
+          onImport={(file) => void importNotes(file)}
         />
-        <button onClick={() => void exportNotes()} disabled={!notes}>
-          Export
-        </button>
-        <label>
-          Import
-          <input
-            type="file"
-            accept=".zip,application/zip"
-            disabled={!notes}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              if (file) void importNotes(file);
-            }}
+        {showTrash ? (
+          <TrashView
+            trashed={trashed}
+            confirmingEmpty={confirmingEmpty}
+            onAskEmpty={() => setConfirmingEmpty(true)}
+            onCancelEmpty={() => setConfirmingEmpty(false)}
+            onEmpty={() => void emptyTrash()}
+            onRestore={(id) => void restore(id)}
           />
-        </label>
-        <div role="status" aria-label="Import summary">
-          {importSummary &&
-            `Imported: ${importSummary.added} added, ${importSummary.updated} updated, ${importSummary.skipped} skipped`}
-          {importError}
-        </div>
-        <ul aria-label="Notes">
-          {list.slice(0, shown).map((note) => (
-            <NoteRow
-              key={note.id}
-              note={note}
-              selected={note.id === selectedId}
-              onSelect={onSelect}
-            />
-          ))}
-        </ul>
-        {list.length > shown && (
-          <button onClick={() => setShown((n) => n + PAGE_SIZE)}>
-            Show more notes ({list.length - shown} more)
-          </button>
-        )}
-      </section>
-      <section className="editor">
-        {selectedId ? (
+        ) : (
           <>
-            <button className="narrow-only" onClick={() => void flush().then(() => setPane("list"))}>
-              Back to notes
-            </button>
-            <button onClick={() => void trashSelected()}>Delete</button>
-            <textarea
-              aria-label="Note text"
-              value={draft}
-              onChange={(e) => edit(e.target.value)}
+            <section className="list">
+              <div className="list__bar">
+                <input
+                  type="search"
+                  aria-label="Search notes"
+                  placeholder="Search (try #tag)"
+                  value={query}
+                  onChange={(e) => void onSearch(e.target.value)}
+                />
+                <button className="btn btn--primary" onClick={newNote} disabled={!notes}>
+                  New note
+                </button>
+              </div>
+              <ImportStatus summary={importSummary} error={importError} />
+              <NoteList
+                notes={list}
+                shown={shown}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                onShowMore={() => setShown((n) => n + PAGE_SIZE)}
+              />
+            </section>
+            <Editor
+              hasNote={!!selectedId}
+              draft={draft}
+              saveStatus={saveStatus}
+              focusSignal={focusSignal}
+              onEdit={edit}
+              onBack={() => void flush().then(() => setPane("list"))}
+              onDelete={() => void trashSelected()}
             />
           </>
-        ) : (
-          <p>Select a note or create a new one.</p>
         )}
-      </section>
-      </>
-      )}
-    </main>
-    </>
+      </main>
+    </div>
   );
 }
