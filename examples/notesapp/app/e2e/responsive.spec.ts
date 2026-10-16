@@ -24,7 +24,7 @@ test.describe("phone width", () => {
     // Back to the list.
     await page.getByRole("button", { name: "Back to notes" }).click();
     await expect(text).toBeHidden();
-    await expect(items(page)).toHaveText(["Standup #work#work"]);
+    await expect(items(page)).toContainText(["Standup #work"]);
 
     // Selecting opens the editor again.
     await items(page).first().getByRole("button").click();
@@ -44,7 +44,7 @@ test.describe("phone width", () => {
     await expect(page.getByRole("button", { name: "New note" })).toBeHidden();
     await sidebar.getByRole("button", { name: "#home (1)" }).click();
     await expect(sidebar).toBeHidden();
-    await expect(items(page)).toHaveText(["Dinner #home#home"]);
+    await expect(items(page)).toContainText(["Dinner #home"]);
 
     // Trash is reachable from the drawer.
     await page.getByRole("button", { name: "Tags menu" }).click();

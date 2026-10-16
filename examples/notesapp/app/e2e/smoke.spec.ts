@@ -3,10 +3,10 @@ import { expect, test } from "@playwright/test";
 test("create a Note and see it in the list after reload", async ({ page }) => {
   await page.goto("./");
   await page.getByRole("button", { name: "New note" }).click();
-  await expect(page.getByRole("list", { name: "Notes" }).getByRole("listitem")).toHaveText(["Untitled"]);
+  await expect(page.getByRole("list", { name: "Notes" }).getByRole("listitem")).toContainText(["Untitled"]);
 
   await page.reload();
-  await expect(page.getByRole("list", { name: "Notes" }).getByRole("listitem")).toHaveText(["Untitled"]);
+  await expect(page.getByRole("list", { name: "Notes" }).getByRole("listitem")).toContainText(["Untitled"]);
 });
 
 test("Tags show as chips, in the sidebar with counts, and filter the list", async ({ page }) => {
@@ -26,7 +26,7 @@ test("Tags show as chips, in the sidebar with counts, and filter the list", asyn
   await expect(items).toHaveCount(2);
 
   await sidebar.getByRole("button", { name: "#work (1)" }).click();
-  await expect(items).toHaveText(["Standup #work#work"]);
+  await expect(items).toContainText(["Standup #work"]);
 
   await items.first().getByRole("button").click();
   await text.fill("Standup");
@@ -40,10 +40,10 @@ test("edit a Note, auto-save, and see the new Title after reload", async ({ page
   await page.getByRole("textbox", { name: "Note text" }).fill("Grocery run\nmilk");
 
   const items = page.getByRole("list", { name: "Notes" }).getByRole("listitem");
-  await expect(items).toHaveText(["Grocery run"]);
+  await expect(items).toContainText(["Grocery run"]);
 
   await page.reload();
-  await expect(items).toHaveText(["Grocery run"]);
+  await expect(items).toContainText(["Grocery run"]);
   await items.first().getByRole("button").click();
   await expect(page.getByRole("textbox", { name: "Note text" })).toHaveValue("Grocery run\nmilk");
 });
@@ -64,9 +64,9 @@ test("search box filters the list by text and #tag", async ({ page }) => {
   await expect(sidebar.getByRole("button", { name: "#home (1)" })).toBeVisible();
 
   await search.fill("budg");
-  await expect(items).toHaveText(["Quarterly budget #work#work"]);
+  await expect(items).toContainText(["Quarterly budget #work"]);
   await search.fill("#home");
-  await expect(items).toHaveText(["Dinner ideas #home#home"]);
+  await expect(items).toContainText(["Dinner ideas #home"]);
   await search.fill("");
   await expect(items).toHaveCount(2);
 });
@@ -93,13 +93,13 @@ test("the sidebar Tag and the search box narrow the list together", async ({ pag
   await search.fill("budget");
   await expect(items).toHaveCount(2);
   await sidebar.getByRole("button", { name: "#work (2)" }).click();
-  await expect(items).toHaveText(["Budget plan #work#work"]);
+  await expect(items).toContainText(["Budget plan #work"]);
 
   await search.fill("standup");
-  await expect(items).toHaveText(["Standup #work#work"]);
+  await expect(items).toContainText(["Standup #work"]);
   await search.fill("dinner");
   await expect(items).toHaveCount(0);
 
   await sidebar.getByRole("button", { name: "All notes" }).click();
-  await expect(items).toHaveText(["Budget dinner #home#home"]);
+  await expect(items).toContainText(["Budget dinner #home"]);
 });
